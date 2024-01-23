@@ -184,7 +184,7 @@ int find_compaction_point(distribution_t *dist, int *idx) {
         RT_PANIC(dist->rt, dist->bins[i] <= dist->bins[i + 1], "Error: Bins are not sorted");
         curr_count = dist->counts[i];
         next_count = dist->counts[i + 1];
-        double delta = abs(curr_count - next_count);
+        double delta = abs(curr_count - next_count) / (double)MAX(curr_count, next_count);
         if (delta > max_delta) {
             max_delta = delta;
             *idx = i;
@@ -208,9 +208,7 @@ int compact(distribution_t *dist) {
         return EXIT_FAILURE;
     }
     
-    dist->bins[compaction_idx] = rand() % 2
-        ? dist->bins[compaction_idx]
-        : dist->bins[compaction_idx + 1];
+    dist->bins[compaction_idx] = (dist->bins[compaction_idx] + dist->bins[compaction_idx + 1]) / 2.0;
     dist->counts[compaction_idx] = dist->counts[compaction_idx] + dist->counts[compaction_idx + 1];
     // Shift elements to remove the next bin
     for (int i = compaction_idx + 1; i < dist->bin_count - 1; i++) {
@@ -324,151 +322,3 @@ void display_distribution(distribution_t *dist) {
     }
     fprintf(stderr, "\n");
 }
-
-/*
-int init_histogram(Histogram **hist, int bin_count) {
-    *hist = NULL;
-    LOG_ASSERT(bin_count > 0, "Error: invalid bin count for histogram");
-    Histogram *result = malloc(sizeof(Histogram));
-    LOG_ASSERT(result != NULL, "Error: could not allocate memory for an histogram");
-    result->bins = malloc(sizeof(histogram_bin_t) * bin_count);
-    result->bin_count = bin_count;
-    // initialize bins with all zeros
-    memset(result->bins, 0, sizeof(histogram_bin_t) * bin_count);
-    LOG_ASSERT(result->bins != NULL, "Error: could not allocate memory for the bins of an histogram");
-    *hist = result;
-    return EXIT_SUCCESS;
-}
-
-int destroy_histogram(Histogram **hist) {
-    LOG_ASSERT(hist != NULL && *hist != NULL, "Error: destroy called with an invalid histogram");
-    free((*hist)->bins);
-    free(*hist);
-    *hist = NULL;
-    return EXIT_SUCCESS;
-}
-
-double compute_delta(distribution_t *dist, double distribution_range, int curr_idx) {
-    double curr_value = dist->bins[curr_idx].value;
-    double next_value = dist->bins[curr_idx + 1].value;
-    double delta = (next_value - curr_value) / distribution_range;
-    return delta;
-}
-
-double compute_connectedness_map(distribution_t *dist, bool **forward_connected, bool **backward_connected) {
-    RT_ASSERT(dist->rt, dist != NULL, "Error: null distribution");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    RT_ASSERT(dist->rt, dist->bin_count > 3, "Error: insuficient values in distribution");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    int delta_count = (dist->bin_count - 1);
-    double min_value = dist->bins[0].value;
-    double max_value = dist->bins[delta_count].value;
-    double distribution_range = max_value - min_value;
-    RT_ASSERT(dist->rt, distribution_range > 0, "Error: distribution has a zero or negative range");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    
-    double sum_of_deltas = 0.0;
-    for (int i = 0; i < delta_count; i++) {
-        sum_of_deltas += compute_delta(dist, distribution_range, i);
-    }
-    double average_delta = sum_of_deltas / delta_count;
-    double threshold =  NUM_AVG_DELTAS * average_delta;
-
-    *forward_connected = malloc(sizeof(bool) * dist->bin_count);
-    RT_PANIC(dist->rt, *forward_connected != NULL, "Error: allocation failed");
-    *backward_connected = malloc(sizeof(bool) * dist->bin_count);
-    RT_PANIC(dist->rt, *backward_connected != NULL, "Error: allocation failed");
-
-    for (int i=0; i < dist->bin_count; i++) {
-        (*forward_connected)[i] = false;
-        (*backward_connected)[i] = false;
-
-        if (i != 0) {
-            (*forward_connected)[i] = compute_delta(dist, distribution_range, i) <= threshold;
-        } 
-        if (i != delta_count) {
-            (*backward_connected)[i] = compute_delta(dist, distribution_range, i - 1) <= threshold;
-        }
-    }
-    return EXIT_SUCCESS;
-}  
-
-int create_histogram(distribution_t *dist, Histogram *hist) {
-    LOG_ASSERT(dist != NULL, "Error: create_histogram called with an unintialised distribution");
-    LOG_ASSERT(dist->bin_count > 3, "Error: invalid number of bins");
-    LOG_ASSERT(hist != NULL, "Error: create_histogram called with an unitialized histogram");
-    LOG_ASSERT(dist->bin_count > 0, "Error: invalid number of bins");
-
-    double min_value = dist->bins[0].value;
-    double max_value = dist->bins[dist->bin_count-1].value;
-    double distribution_range = max_value - min_value;
-    LOG_ASSERT(distribution_range > 0.0, "Error: distribution range is zero or negative");
-    double bin_size = distribution_range / hist->bin_count;
-    LOG_ASSERT(bin_size > 0.0, "Error: bin size is zero or negative");
-    
-    int retcode;
-    bool *forward_connected;
-    bool *backward_connected;
-    retcode = compute_connectedness_map(dist, &forward_connected, &backward_connected);
-    LOG_ASSERT(retcode == EXIT_SUCCESS, "Error: failed to compute connected map successfully");
-    
-    for (int i = 0; i < dist->bin_count - 1; i++) {
-        
-        // is the value an isolated one? Ignore if so
-        if (!backward_connected[i] && !forward_connected[i]) {
-            continue;
-        }
-        // is the value a local minimum? Ignore if so
-        // dist->bins[dist->bin_count - 1].value is the last value in the distribution
-        // and is always a local minimum
-        if (backward_connected[i] && !forward_connected[i]) {
-            continue;
-        }
-
-        double curr_value = dist->bins[i].value;
-        double next_value = dist->bins[i + 1].value;
-        double bin_range = next_value - curr_value;
-        double bin_start = curr_value;
-        double step = bin_range / BIN_RESOLUTION;
-
-        for (int j = 0; j < BIN_RESOLUTION; j++) {
-            double bin_value = bin_start + (j * step);
-            double bin_value_pct = (bin_value - min_value) / distribution_range;
-            int histogram_idx = (int)(bin_value_pct * hist->bin_count);
-            bool invalid_index = histogram_idx < 0 || histogram_idx >= hist->bin_count;
-            if (invalid_index) {
-                LOG_ERROR("Error: invalid histogram index (%d)", histogram_idx);
-                LOG_ERROR("Error: bin_value_pct = %lf", bin_value_pct);
-                LOG_ERROR("Error: bin_value = %lf", bin_value);
-                LOG_ERROR("Error: min_value = %lf", min_value);
-                LOG_ERROR("Error: max_value = %lf", max_value);
-                LOG_ERROR("Error: distribution_range = %lf", distribution_range);
-                LOG_ERROR("Error: bin_size = %lf", bin_size);
-                LOG_ERROR("Error: bin_start = %lf", bin_start);
-                LOG_ERROR("Error: step = %lf", step);
-                LOG_ERROR("Error: curr_value = %lf", curr_value);
-                LOG_ERROR("Error: next_value = %lf", next_value);
-                LOG_ERROR("Error: bin_range = %lf", bin_range);
-                LOG_ERROR("Error: i = %d", i);
-                LOG_ERROR("Error: j = %d", j);
-                LOG_ERROR("Error: BIN_RESOLUTION = %d", BIN_RESOLUTION);
-                LOG_ERROR("Error: hist->bin_count = %d", hist->bin_count);
-                LOG_FATAL("Fatal error: exiting");
-            }
-            if (hist->bins[histogram_idx].count == 0) {
-                hist->bins[histogram_idx].value = bin_value;
-            }
-            hist->bins[histogram_idx].count++;
-        }
-    }
-    free(forward_connected);
-    free(backward_connected);
-    return EXIT_SUCCESS;
-}
-*/

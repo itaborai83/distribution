@@ -4,10 +4,6 @@
 #include <stdbool.h>
 #include "runtime.h"
 
-#define BIN_COUNT 100
-#define OUTLIER_COUNT 10
-#define BIN_RESOLUTION 1000
-
 // typedefs
 typedef struct {
     runtime_t *rt;    
@@ -42,9 +38,5 @@ extern int compact(distribution_t *dist);
 extern int update_distribution(distribution_t *dist, double value);
 extern void display_distribution(distribution_t *dist);
 extern int write_distribution(distribution_t *dist, char *filename);
-/*
-extern int init_histogram(Histogram **hist, int bin_count);
-extern int destroy_histogram(Histogram **hist);
-extern int create_histogram(distribution_t *dist, Histogram *hist);
-*/
+
 #endif // DISTRIBUTION_H
