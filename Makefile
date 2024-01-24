@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -I/usr/include/json-c -I./ -DBIN_COUNT=200 -DOUTLIER_COUNT=10
+CFLAGS = -Wall -Wextra -I/usr/include/json-c -I./ -DBIN_COUNT=200 -DOUTLIER_COUNT=2 -O0 -g
 LDFLAGS = -ljson-c -lm
 
 HDR = distribution.h logger.h runtime.h

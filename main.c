@@ -30,13 +30,26 @@ int compare(char *filename, distribution_t *dist, double *samples, int sample_co
     LOG_ASSERT(fp != NULL, "Error: Failed to open file %s", filename);
 
     fprintf(fp, "PCT\tSAMPLE\tDIST\tDIFF\n");
-    for (int bin_idx = 0; bin_idx < dist->bin_count; bin_idx++) {
-        int sample_idx = ((double)bin_idx / (double)dist->bin_count) * (double)sample_count;
+    for (double pct = 0.0; pct <= 0.999; pct += 0.001) {
+        double value;
+        retcode = get_percentile(dist, pct, &value);
+        RT_CHECK_NO_ERROR(dist->rt);
+        double double_sample_idx = pct * sample_count;
+        int sample_idx = (int)double_sample_idx;
+        double sample_value = samples[sample_idx];
+
+        if (sample_idx < sample_count - 1) {
+            double next_sample_pct = (sample_idx + 1) / (double)sample_count;
+            double delta_sample_pct = pct - next_sample_pct;
+            double next_sample_value = samples[sample_idx + 1];
+            double delta_sample_value = next_sample_value - sample_value;
+            sample_value += delta_sample_value * delta_sample_pct;
+        }
         fprintf(fp, "%lf\t%lf\t%lf\t%lf\n", 
-            bin_idx / (double)dist->bin_count,
-            samples[sample_idx],
-            dist->bins[bin_idx],
-            samples[sample_idx] - dist->bins[bin_idx]
+            pct,
+            sample_value,
+            value,
+            sample_value - value
         );
     }
     retcode = fclose(fp);
@@ -66,25 +79,10 @@ int main() {
         //display_distribution(&dist);
         RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to update distribution");        
     }
-    display_distribution(&dist);
+    display_distribution(&dist, stderr);
     
     double sample_count = dist.count < capacity ? dist.count : capacity;
     retcode = compare("histog.out", &dist, samples, sample_count);
     LOG_ASSERT(retcode == EXIT_SUCCESS, "Error: Failed to compare distributions");
-    
-    /*
-    Histogram *hist = NULL;
-    retcode = init_histogram(&hist, 20);
-    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to initialize histogram");
-    retcode = create_histogram(&dist, hist);
-    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to create histogram");
-    
-    for (int i = 0; i < hist->bin_count; i++) {
-        LOG_DEBUG("%lf\t%d", hist->bins[i].value, hist->bins[i].count);
-    }
-    
-    retcode = destroy_histogram(&hist);
-    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to destroy histogram");
-    */
     return 0;
 }

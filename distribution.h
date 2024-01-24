@@ -9,12 +9,10 @@ typedef struct {
     runtime_t *rt;    
     int count;
     int bin_count;
-    int left_outlier_count;
-    int right_outlier_count;
-    double left_outliers[OUTLIER_COUNT];
     double bins[BIN_COUNT];
-    double counts[BIN_COUNT];
-    double right_outliers[OUTLIER_COUNT];
+    int merges[BIN_COUNT];
+    int curr_gap;
+    int last_insert_idx;
 } distribution_t;
 
 typedef struct {
@@ -29,14 +27,9 @@ typedef struct {
 
 extern void init_distribution(runtime_t *rt, distribution_t *dist);
 extern void copy_distribution(distribution_t *src, distribution_t *dst);
-extern int update_left_outliers(distribution_t *dist, double *value, bool *keep_going);
-extern int update_right_outliers(distribution_t *dist, double *value, bool *keep_going);
-extern bool is_full(distribution_t *dist);
-extern int find_closest_bins(distribution_t *dist, double value, bool *exact_match, int *min_idx, int *next_idx);
-int find_compaction_point(distribution_t *dist, int *idx);
-extern int compact(distribution_t *dist);
 extern int update_distribution(distribution_t *dist, double value);
-extern void display_distribution(distribution_t *dist);
-extern int write_distribution(distribution_t *dist, char *filename);
+extern void display_distribution(distribution_t *dist, FILE *fp);
+extern int get_percentile(distribution_t *dist, double pct, double *value);
+extern int get_percentile_index(distribution_t *dist, double pct, int *index);
 
 #endif // DISTRIBUTION_H
