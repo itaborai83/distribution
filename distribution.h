@@ -30,6 +30,5 @@ extern void copy_distribution(distribution_t *src, distribution_t *dst);
 extern int update_distribution(distribution_t *dist, double value);
 extern void display_distribution(distribution_t *dist, FILE *fp);
 extern int get_percentile(distribution_t *dist, double pct, double *value);
-extern int get_percentile_index(distribution_t *dist, double pct, int *index);
 
 #endif // DISTRIBUTION_H

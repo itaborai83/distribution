@@ -57,6 +57,36 @@ int compare(char *filename, distribution_t *dist, double *samples, int sample_co
     return EXIT_SUCCESS;
 }
 
+int write_data(distribution_t *dist, char *filename, bool open, bool close) {
+    int retcode = 0;
+    static FILE *fp;
+
+    if (open) {
+        fp = fopen(filename, "wb");
+        LOG_ASSERT(fp != NULL, "Error: Failed to open file %s", filename);
+        return EXIT_SUCCESS;
+    }
+    if (close) {
+        retcode = fclose(fp);
+        LOG_ASSERT(retcode == 0, "Error: Failed to close file %s", filename);
+        return EXIT_SUCCESS;
+    }    
+    double merge_count = 0.0;
+    for (int i = 0; i < BIN_COUNT; i++) {
+        merge_count += dist->merges[i];
+    }
+    for (int i = 0; i < BIN_COUNT; i++) {
+        double row[3];
+        row[0] = i;
+        row[1] = dist->bins[i];
+        row[2] = merge_count == 0.0 ? 0.0 : ((double)dist->merges[i]) / merge_count;
+        int written = fwrite(row, sizeof(double), 3, fp);
+        LOG_ASSERT(written == 3, "Error: Failed to write data to file %s", filename);
+    }
+    // add a blank line between files to indicate the end of a dataset
+    return EXIT_SUCCESS;
+}
+
 int main() {
     int retcode;
     double *samples = NULL;
@@ -67,10 +97,13 @@ int main() {
 
     runtime_t rt;
     distribution_t dist;
+    runtime_init(&rt);
     init_distribution(&rt, &dist);
     srand(0);
 
     double value;
+    retcode = write_data(&dist, "./data/animation/distribution.bin", true, false);
+    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to open distribution data file");
     while (scanf("%lf", &value) != EOF) {
         samples[++curr_sample_idx] = value;
         curr_sample_idx = curr_sample_idx % capacity;
@@ -78,7 +111,12 @@ int main() {
         retcode = update_distribution(&dist, value);
         //display_distribution(&dist);
         RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to update distribution");        
+        retcode = write_data(&dist, "./data/animation/distribution.bin", false, false);
+        RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to write distribution data");
     }
+    retcode = write_data(&dist, "./data/animation/distribution.bin", false, true);
+    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to close distribution data file");
+    
     display_distribution(&dist, stderr);
     
     double sample_count = dist.count < capacity ? dist.count : capacity;
