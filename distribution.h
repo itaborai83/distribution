@@ -8,22 +8,12 @@
 typedef struct {
     runtime_t *rt;    
     int count;
-    int bin_count;
-    double bins[BIN_COUNT];
-    int merges[BIN_COUNT];
-    int curr_gap;
-    int last_insert_idx;
+    int bin_count_a;
+    int bin_count_b;
+    int generation;
+    double bins_a[BIN_COUNT];
+    double bins_b[BIN_COUNT];
 } distribution_t;
-
-typedef struct {
-    int count;
-    double value;
-} histogram_bin_t;
-
-typedef struct {
-    int bin_count;    
-    histogram_bin_t *bins;
-} Histogram;
 
 extern void init_distribution(runtime_t *rt, distribution_t *dist);
 extern void copy_distribution(distribution_t *src, distribution_t *dst);

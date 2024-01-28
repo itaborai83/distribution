@@ -15,103 +15,90 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 bool is_full(distribution_t *dist);
-int find_compaction_index(distribution_t *dist, int *idx);
 int compact(distribution_t *dist);
-double interpolate(distribution_t *dist, int start_idx, int end_idx);
+double interpolate(double *bins, int start_idx, int end_idx);
 
 void init_distribution(runtime_t *rt, distribution_t *dist) {
     dist->count = 0;
-    dist->bin_count = 0;
-    dist->curr_gap = BIN_COUNT / 2;
-    dist->last_insert_idx = 0;
-    for(int i = 0; i < BIN_COUNT; i++) {
-        dist->bins[i] = 0.0;
-        dist->merges[i] = 0.0;
-    }
+    dist->bin_count_a = 0;
+    dist->bin_count_b = 0;
+    dist->generation = 0;
+    memset(dist->bins_a, 0, sizeof(dist->bins_a));
+    memset(dist->bins_b, 0, sizeof(dist->bins_b));
     dist->rt = rt;
 }
 
 void copy_distribution(distribution_t *src, distribution_t *dst) {
     dst->rt = src->rt;
     dst->count = src->count;
-    dst->bin_count = src->bin_count;
-    dst->curr_gap = src->curr_gap;
-    dst->last_insert_idx = src->last_insert_idx;
-    memcpy(dst->bins, src->bins, sizeof(src->bins));
-    memcpy(dst->merges, src->merges, sizeof(src->merges));
+    dst->bin_count_a = src->bin_count_a;
+    dst->bin_count_b = src->bin_count_b;
+    dst->generation = src->generation;
+    memcpy(dst->bins_a, src->bins_a, sizeof(src->bins_a));
+    memcpy(dst->bins_b, src->bins_b, sizeof(src->bins_b));
 }
 
-bool is_full(distribution_t *dist) {
-    return  dist->bin_count == BIN_COUNT;
+int get_current_bins(distribution_t *dist, int **bin_count, double **bins) {
+    if (dist->generation % 2 == 0) {
+        *bin_count = &dist->bin_count_a;
+        *bins = dist->bins_a;
+    } else {
+        *bin_count = &dist->bin_count_b;
+        *bins = dist->bins_b;
+    }
+    return EXIT_SUCCESS;
 }
 
-int insert_value(distribution_t *dist, double value) {
-    RT_ASSERT(dist->rt, dist->bin_count < BIN_COUNT, "Error: Bin count is greater than default bin count");
+bool is_full(distribution_t *dist) {    
+    int *bin_count;
+    double *bins;
+    int retcode = get_current_bins(dist, &bin_count, &bins);
+    RT_PANIC(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
+    return *bin_count == BIN_COUNT;
+}
+
+int insert_value(distribution_t *dist, double value) {    
+    int *bin_count;
+    double *bins;
+    
+    int retcode = get_current_bins(dist, &bin_count, &bins);
+    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
+    if (dist->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    RT_ASSERT(dist->rt, (*bin_count) < BIN_COUNT, "Error: Bin count is greater than default bin count");
+    if (dist->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+
+
     // find the position to insert the new element
     int i, j;
-    for (i = 0; i < dist->bin_count; i++) {
-        if (dist->bins[i] > value) {
+    for (i = 0; i < *bin_count; i++) {
+        if (bins[i] > value) {
             break;
         }
     }
     
     // shift the elements to make room for the new element
-    for (j = dist->bin_count; j > i; j--) {
-        dist->bins[j] = dist->bins[j - 1];
-        //dist->merges[j] = dist->merges[j - 1];
+    for (j = *bin_count; j > i; j--) {
+        bins[j] = bins[j - 1];
     }
-    dist->bins[i] = value;
-    dist->bin_count++;
-    if (dist->bin_count == BIN_COUNT) {
-        dist->merges[i] += 1; // bump up merge count because it helps with compaction
-    }
-    dist->last_insert_idx = i;
+    bins[i] = value;
+    (*bin_count)++;
+    dist->count++;
     return EXIT_SUCCESS;
 }
 
-int find_compaction_index(distribution_t *dist, int *idx) {
-    int candidate_count = BIN_COUNT / dist->curr_gap;
-    double delta = DBL_MIN;
-    double min_delta = DBL_MAX;
-    *idx = INT_MAX;
-
-    // compute candidate compaction points
-    for (int i = 0; i < candidate_count; i++) {
-        int compaction_idx = (dist->count + i * dist->curr_gap) % (dist->bin_count - 2);
-        RT_PANIC(dist->rt, dist->bins[compaction_idx] <= dist->bins[compaction_idx + 1], "Error: Bins are not sorted");
-        int curr_merges = dist->merges[compaction_idx];
-        int next_merges = dist->merges[compaction_idx + 1];
-        double sum_merges = (double)(curr_merges + next_merges);
-        delta = sum_merges / (sum_merges + 1.0);
-        if (delta < min_delta) {
-            min_delta = delta;
-            *idx = compaction_idx;
-        }
-    }
-    bool valid_idx = *idx >= 0 && *idx < dist->bin_count - 1;
-    if (!valid_idx) {
-        RT_ASSERT(dist->rt, valid_idx, "Error: Compaction index is not in the range [0, bin_count - 1]: %d", *idx);
-        LOG_DEBUG("last delta = %0.2lf, min_delta = %0.2lf, idx = %d, bin_count = %d", delta, min_delta, *idx, dist->bin_count);
-        if (dist->rt->has_error) {
-            return EXIT_FAILURE;
-        }
-    }
-    dist->curr_gap = dist->curr_gap / 2;
-    if (dist->curr_gap <= 1) {
-        dist->curr_gap = BIN_COUNT / 2;
-    }
-    return EXIT_SUCCESS;
-}
-
-double interpolate(distribution_t *dist, int start_idx, int end_idx) {
+double interpolate(double *bins, int start_idx, int end_idx) {
     // perform linear interpolation between the current bin and the next bin using the bin index as the x-axis
     double x1 = start_idx;
     double x2 = end_idx;
-    double y1 = dist->bins[start_idx];
-    double y2 = dist->bins[end_idx];
+    double y1 = bins[start_idx];
+    double y2 = bins[end_idx];
     double x = (x1 + x2) / 2.0;
     double m = (y2 - y1) / (x2 - x1);
     double y = m * (x - x1) + y1;
@@ -119,91 +106,74 @@ double interpolate(distribution_t *dist, int start_idx, int end_idx) {
 }
 
 int compact(distribution_t *dist) {
-    int retcode;
-    RT_ASSERT(dist->rt, dist->bin_count == BIN_COUNT, "Error: Bin count is not equal to default bin count");
+    double new_bins[BIN_COUNT / 2];
+    
+    int *bin_count;
+    double *bins;
+    int retcode = get_current_bins(dist, &bin_count, &bins);
+    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
-    
-    // find the compaction point
-    int compaction_idx;
-    retcode = find_compaction_index(dist, &compaction_idx);
-    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to find compaction point");
+
+    RT_ASSERT(dist->rt, (*bin_count) == BIN_COUNT, "Error: Bin count is not equal to default bin count");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
-    
-    double new_value = interpolate(dist, compaction_idx, compaction_idx + 1);
-    double delta = new_value - dist->bins[compaction_idx];
-    // number of bins after the two compacted bins excluding the last one
-    int bins_after_compaction_point = dist->bin_count - compaction_idx - 2;
-    double step = delta / (double)(bins_after_compaction_point);
-    // distribute the compaction error to the bins after the compaction point
-    for (int i = 0; i < bins_after_compaction_point; i++) {
-        int bin_idx = compaction_idx + 2 + i;
-        if (bin_idx == dist->bin_count - 1) {
-            break;
+
+    for (int i = 0; i < (*bin_count) / 2; i++) {
+        int start_idx = i * 2;
+        int end_idx = i * 2 + 1;
+        new_bins[i] = interpolate(bins, start_idx, end_idx);
+    }
+    for (int i = 0; i < (*bin_count); i++) {
+        if (i < (*bin_count) / 2) {
+            bins[i] = new_bins[i];
+        } else {
+            bins[i] = 0.0;
         }
-        dist->bins[compaction_idx + 2 + i] += step;
     }
-    
-    dist->bins[compaction_idx] = new_value;
-    dist->merges[compaction_idx]++;
-    dist->merges[compaction_idx + 1]++;
-
-    // Shift elements to remove the next bin
-    for (int i = compaction_idx + 1; i < dist->bin_count - 1; i++) {
-        dist->bins[i] = dist->bins[i + 1];
-    }
-
-    // Update the bin count and clear the last bin
-    dist->bin_count--;
-    dist->bins[dist->bin_count] = 0.0;
-    dist->merges[dist->bin_count] = 0;
+    (*bin_count) /= 2;
     return EXIT_SUCCESS;
 }
 
 int update_distribution(distribution_t *dist, double value) {
     int retcode;
-
-    dist->count++;
-
-    if (dist->count == 1) {
-        dist->bins[0] = value;
-        dist->merges[0] = 0;
-        dist->bin_count = 1;
-        return EXIT_SUCCESS;
-    }
-
     if (is_full(dist)) {
-        retcode = compact(dist);
-        RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to compact distribution");
-        if (dist->rt->has_error) {
-            return EXIT_FAILURE;
+        dist->generation++;
+        if (dist->generation > 1) { // do not compact the first generation
+            // compact the old bins
+            retcode = compact(dist);
+            RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to compact distribution");
+            if (dist->rt->has_error) {
+                return EXIT_FAILURE;
+            }
         }
     }
-    
-    RT_ASSERT(dist->rt, dist->bin_count < BIN_COUNT, "Error: Bin count is greater than default bin count");    
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    
+        
     retcode = insert_value(dist, value);
     RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to insert value into distribution");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
+
     return EXIT_SUCCESS;
 }
 
 void display_distribution(distribution_t *dist, FILE *fp) {
-    fprintf(fp, "Distribution: Count = %d, Bin Count = %d\n", dist->count, dist->bin_count);
-    fprintf(fp, "    Bins: \n");
-    for (int i = 0; i < dist->bin_count; i++) {
+    fprintf(fp, "Distribution: Count = %d, Bin Count A = %d, Bin Count B = %d, Generation = %d\n", 
+        dist->count,
+        dist->bin_count_a,
+        dist->bin_count_b,
+        dist->generation
+    );
+
+    fprintf(fp, "    Bins A: \n");
+    for (int i = 0; i < dist->bin_count_a; i++) {
         if (i % 20 == 0) {
             fprintf(fp, "    ") ;
         }
-        fprintf(fp, "%0.2lf", dist->bins[i]);
+        fprintf(fp, "%0.2lf", dist->bins_a[i]);
         if (i % 20 == 19) { 
             fprintf(fp, "\n");
         } else {
@@ -211,12 +181,12 @@ void display_distribution(distribution_t *dist, FILE *fp) {
         }
     }
     fprintf(fp, "\n");
-    fprintf(fp, "    Merges: \n");
-    for (int i = 0; i < dist->bin_count; i++) {
+    fprintf(fp, "    Bins B: \n");
+    for (int i = 0; i < dist->bin_count_b; i++) {
         if (i % 20 == 0) {
             fprintf(fp, "    ") ;
         }
-        fprintf(fp, "%d", dist->merges[i]);
+        fprintf(fp, "%0.2lf", dist->bins_b[i]);
         if (i % 20 == 19) { 
             fprintf(fp, "\n");
         } else {
@@ -226,8 +196,35 @@ void display_distribution(distribution_t *dist, FILE *fp) {
     fprintf(fp, "\n");
 }
 
+int get_percentile_aux(runtime_t *rt, double *bins, int bin_count, double pct, double *value) {
+    double double_idx = pct * bin_count;
+    int idx = (int)double_idx;
+    if (idx >= bin_count) {
+        *value = bins[bin_count - 1];
+        return EXIT_SUCCESS;
+    }
+    
+    *value = bins[idx];
+    if (idx == bin_count - 1) {
+        return EXIT_SUCCESS;
+    }    
+    double curr_pct = (idx) / (double)bin_count;
+    double next_pct = (idx + 1) / (double)bin_count;
+    double pct_range = next_pct - curr_pct;
+    double bin_range = bins[idx + 1] - bins[idx];
+    double error_pct = (pct - curr_pct) / pct_range;
+    double correction_term = error_pct * bin_range;
+    *value += correction_term;
+    RT_ASSERT(rt, correction_term >= 0.0, "Error: Correction term is negative");
+    RT_ASSERT(rt, correction_term <= bin_range, "Error: Correction term is greater than bin range");
+    if (rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int get_percentile(distribution_t *dist, double pct, double *value) {
-    RT_ASSERT(dist->rt, pct >= 0.0 && pct < 1.0, "Error: Percentile is out of range");
+    RT_ASSERT(dist->rt, pct >= 0.0 && pct <= 1.0, "Error: Percentile is out of range");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
@@ -236,32 +233,23 @@ int get_percentile(distribution_t *dist, double pct, double *value) {
         return EXIT_SUCCESS;
     }
     if (dist->count == 1) {
-        *value = dist->bins[0];
-        return EXIT_SUCCESS;
-    }
-    double double_idx = pct * (dist->bin_count);
-    int idx = (int)double_idx;
-    if (idx >= dist->bin_count) {
-        *value = dist->bins[dist->bin_count - 1];
+        *value = dist->bins_a[0];
         return EXIT_SUCCESS;
     }
     
-    *value = dist->bins[idx];
-    if (idx == dist->bin_count - 1) {
-        return EXIT_SUCCESS;
-    }    
-    double curr_pct = (idx) / (double)dist->bin_count;
-    double next_pct = (idx + 1) / (double)dist->bin_count;
-    double pct_range = next_pct - curr_pct;
-    double bin_range = dist->bins[idx + 1] - dist->bins[idx];
-    double error_pct = (pct - curr_pct) / pct_range;
-    double correction_term = error_pct * bin_range;
-    *value += correction_term;
-    RT_ASSERT(dist->rt, correction_term >= 0.0, "Error: Correction term is negative");
-    RT_ASSERT(dist->rt, correction_term <= bin_range, "Error: Correction term is greater than bin range");
+    double result_a;
+    int retcode_a = get_percentile_aux(dist->rt, dist->bins_a, dist->bin_count_a, pct, &result_a);
+    RT_ASSERT(dist->rt, retcode_a == EXIT_SUCCESS, "Error: Failed to get percentile from bins A");
     if (dist->rt->has_error) {
         return EXIT_FAILURE;
     }
+    
+    double result_b;
+    int retcode_b = get_percentile_aux(dist->rt, dist->bins_b, dist->bin_count_b, pct, &result_b);
+    RT_ASSERT(dist->rt, retcode_b == EXIT_SUCCESS, "Error: Failed to get percentile from bins B");
+    if (dist->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    *value = (result_a * dist->bin_count_a + result_b * dist->bin_count_b) / ((double) dist->bin_count_a + dist->bin_count_b);
     return EXIT_SUCCESS;
 }
-
