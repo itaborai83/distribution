@@ -11,88 +11,217 @@
 #include "logger.h"
 #include "runtime.h"
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-
-bool is_full(distribution_t *dist);
-int compact(distribution_t *dist);
-double interpolate(double *bins, int start_idx, int end_idx);
-
-void init_distribution(runtime_t *rt, distribution_t *dist) {
-    dist->count = 0;
-    dist->bin_count_a = 0;
-    dist->bin_count_b = 0;
-    dist->generation = 0;
-    memset(dist->bins_a, 0, sizeof(dist->bins_a));
-    memset(dist->bins_b, 0, sizeof(dist->bins_b));
-    dist->rt = rt;
+retcode_t hst_init(runtime_t *rt, histogram_t *hst, int base, int exponent) {
+    hst->rt = rt;
+    hst->count = 0;
+    hst->bin_count = 0;
+    hst->exponent = exponent;
+    hst->base = base;
+    memset(hst->bins, 0, sizeof(hst->bins));
+    return EXIT_SUCCESS;
 }
 
-void copy_distribution(distribution_t *src, distribution_t *dst) {
-    dst->rt = src->rt;
-    dst->count = src->count;
-    dst->bin_count_a = src->bin_count_a;
-    dst->bin_count_b = src->bin_count_b;
-    dst->generation = src->generation;
-    memcpy(dst->bins_a, src->bins_a, sizeof(src->bins_a));
-    memcpy(dst->bins_b, src->bins_b, sizeof(src->bins_b));
+retcode_t hst_destroy(histogram_t *hst) {
+    hst->rt = NULL;
+    hst->count = -1;
+    hst->bin_count = -1;
+    hst->exponent = -1;
+    hst->base = -1;
+    memset(hst->bins, 0, sizeof(hst->bins));
+    return EXIT_SUCCESS;
 }
 
-int get_current_bins(distribution_t *dist, int **bin_count, double **bins) {
-    if (dist->generation % 2 == 0) {
-        *bin_count = &dist->bin_count_a;
-        *bins = dist->bins_a;
-    } else {
-        *bin_count = &dist->bin_count_b;
-        *bins = dist->bins_b;
+retcode_t hst_compact(histogram_t *hst) {
+    bin_t new_bins[BIN_COUNT];
+    int new_bin_count;
+
+    RT_ASSERT(hst->rt, hst->bin_count == BIN_COUNT, "Error: Histogram is not full");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+
+    for (int i = 0; i < hst->bin_count; i++) {
+        RT_ASSERT(hst->rt, hst->bins[i].count > 0, "Error: found an uncompacted bin with an empty count at index %d", i);
+        if (hst->rt->has_error) {
+            return EXIT_FAILURE;
+        }
+    }
+
+recompact:
+    new_bin_count = 0;
+    memset(new_bins, 0, sizeof(new_bins));
+    // compact the old bins into the new bins
+    for (int i = 0; i < BIN_COUNT; i++) {
+        
+        double new_alpha = floor(hst->bins[i].alpha / hst->base);
+        
+        if (new_bin_count == 0) {
+            new_bins[new_bin_count].alpha = new_alpha;
+            new_bins[new_bin_count].count = hst->bins[i].count;
+            new_bin_count++;
+            continue;
+        } 
+
+        if (new_bins[new_bin_count - 1].alpha == new_alpha) {
+            new_bins[new_bin_count - 1].count += hst->bins[i].count;
+            continue;
+        }
+        // allocate a new bin in the new bins array for the current bin
+        new_bins[new_bin_count].alpha = new_alpha;
+        new_bins[new_bin_count].count = hst->bins[i].count;
+        new_bin_count++;
+    }
+
+    // clear old bins
+    memset(hst->bins, 0, sizeof(hst->bins));
+    for (int i = 0; i < BIN_COUNT; i++) {
+        if (i < new_bin_count) {
+            hst->bins[i].alpha = new_bins[i].alpha;
+            hst->bins[i].count = new_bins[i].count;
+        } else {
+            hst->bins[i].alpha = 0;
+            hst->bins[i].count = 0;
+        }
+    }
+
+    hst->bin_count = new_bin_count;
+    hst->exponent++;
+    if (hst->bin_count == BIN_COUNT) {
+        goto recompact;
     }
     return EXIT_SUCCESS;
 }
 
-bool is_full(distribution_t *dist) {    
-    int *bin_count;
-    double *bins;
-    int retcode = get_current_bins(dist, &bin_count, &bins);
-    RT_PANIC(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    return *bin_count == BIN_COUNT;
-}
-
-int insert_value(distribution_t *dist, double value) {    
-    int *bin_count;
-    double *bins;
+retcode_t hst_find_insertion_point(histogram_t *hst, double value, int *idx, bool *match) {
+    int i = 0;
+    *match = false;
     
-    int retcode = get_current_bins(dist, &bin_count, &bins);
-    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    RT_ASSERT(dist->rt, (*bin_count) < BIN_COUNT, "Error: Bin count is greater than default bin count");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
+    int alpha = floor(value / pow(hst->base, hst->exponent));
+    
+    for (i = 0; i < hst->bin_count; i++) {
+        RT_ASSERT(hst->rt, hst->bins[i].count > 0, "Error: Bin count is zero");
+        if (hst->rt->has_error) {
+            return EXIT_FAILURE;
+        }
 
+        if (hst->bins[i].alpha == alpha) {
+            *match = true;
+            *idx = i;
+            return EXIT_SUCCESS;
+        }
 
-    // find the position to insert the new element
-    int i, j;
-    for (i = 0; i < *bin_count; i++) {
-        if (bins[i] > value) {
+        if (alpha < hst->bins[i].alpha) {
             break;
         }
     }
+    RT_ASSERT(hst->rt, 0 <= i && i <= BIN_COUNT, "Error: Failed to find insertion point: %d", i);
     
-    // shift the elements to make room for the new element
-    for (j = *bin_count; j > i; j--) {
-        bins[j] = bins[j - 1];
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
     }
-    bins[i] = value;
-    (*bin_count)++;
-    dist->count++;
+    *idx = i;
     return EXIT_SUCCESS;
 }
 
+retcode_t hst_update(histogram_t *hst, double value) {
+    retcode_t rc;
+
+    int idx;
+    bool match;
+    rc = hst_find_insertion_point(hst, value, &idx, &match);
+    RT_ASSERT(hst->rt, rc == EXIT_SUCCESS, "Error: Failed to find insertion point");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+
+    if (match) {
+        hst->bins[idx].count++;
+        hst->count++;
+        return EXIT_SUCCESS;
+    } 
+    
+    // compact the histogram if it is full
+    if (hst->bin_count == BIN_COUNT) {
+        rc = hst_compact(hst);
+        RT_ASSERT(hst->rt, rc == EXIT_SUCCESS, "Error: Failed to compact histogram");
+        if (hst->rt->has_error) {
+            return EXIT_FAILURE;
+        }
+        RT_ASSERT(hst->rt, hst->bin_count < BIN_COUNT, "Error: Histogram is still full after compaction");
+        if (hst->rt->has_error) {
+            return EXIT_FAILURE;
+        }
+    }
+
+    // having compacted the histogram, find the insertion point again
+    rc = hst_find_insertion_point(hst, value, &idx, &match);
+    RT_ASSERT(hst->rt, rc == EXIT_SUCCESS, "Error: Failed to find insertion point");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    
+    // if the value is already in the histogram, increment the count
+    if (match) {
+        hst->bins[idx].count++;
+        hst->count++;
+        return EXIT_SUCCESS;
+    } 
+
+    // shift the elements to make room for the new element
+    for (int i = hst->bin_count; i >= idx; i--) {
+        hst->bins[i].alpha = hst->bins[i - 1].alpha;
+        hst->bins[i].count = hst->bins[i - 1].count;
+    }
+    hst->bins[idx].alpha = floor(value / pow(hst->base, hst->exponent));
+    hst->bins[idx].count = 1;
+    hst->count++;
+    hst->bin_count++;
+    
+    RT_ASSERT(hst->rt, hst->bin_count <= BIN_COUNT, "Error: Bin count is greater than default bin count");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS; 
+}
+
+retcode_t hst_display(histogram_t *hst, FILE *fp) {
+    fprintf(fp, "Histogram: Count = %d, Bin Count = %d, Exponent = %d\n", 
+        hst->count,
+        hst->bin_count,
+        hst->exponent
+    );
+    fprintf(fp, "    Bins: \n");
+    for (int i = 0; i < hst->bin_count; i++) {
+        double value = hst->bins[i].alpha * pow(hst->base, hst->exponent);
+        int count = hst->bins[i].count;
+        if (i % 5 == 0) {
+            fprintf(fp, "    ") ;
+        }
+        fprintf(fp, "(%0.2lf, %d)", value, count);
+        if (i % 5 == 4) { 
+            fprintf(fp, "\n");
+        } else {
+            fprintf(fp, " ");
+        }
+    }
+    fprintf(fp, "\n");
+    return EXIT_SUCCESS;
+}
+
+extern retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts) {
+    double curr_count = 0.0;
+    double curr_pct = 0.0;
+    pcts->bin_count = hst->bin_count;
+    for (int i = 0; i < hst->bin_count; i++) {
+        double bin_pct = curr_count / (double)hst->count;
+        pcts->pcts[i] = bin_pct;
+        pcts->values[i] = hst->bins[i].alpha * pow(hst->base, hst->exponent);
+        curr_count += hst->bins[i].count;
+    }
+    return EXIT_SUCCESS;
+}
+/*
 double interpolate(double *bins, int start_idx, int end_idx) {
     // perform linear interpolation between the current bin and the next bin using the bin index as the x-axis
     double x1 = start_idx;
@@ -105,96 +234,6 @@ double interpolate(double *bins, int start_idx, int end_idx) {
     return y;
 }
 
-int compact(distribution_t *dist) {
-    double new_bins[BIN_COUNT / 2];
-    
-    int *bin_count;
-    double *bins;
-    int retcode = get_current_bins(dist, &bin_count, &bins);
-    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get current bins");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-
-    RT_ASSERT(dist->rt, (*bin_count) == BIN_COUNT, "Error: Bin count is not equal to default bin count");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-
-    for (int i = 0; i < (*bin_count) / 2; i++) {
-        int start_idx = i * 2;
-        int end_idx = i * 2 + 1;
-        new_bins[i] = interpolate(bins, start_idx, end_idx);
-    }
-    for (int i = 0; i < (*bin_count); i++) {
-        if (i < (*bin_count) / 2) {
-            bins[i] = new_bins[i];
-        } else {
-            bins[i] = 0.0;
-        }
-    }
-    (*bin_count) /= 2;
-    return EXIT_SUCCESS;
-}
-
-int update_distribution(distribution_t *dist, double value) {
-    int retcode;
-    if (is_full(dist)) {
-        dist->generation++;
-        if (dist->generation > 1) { // do not compact the first generation
-            // compact the old bins
-            retcode = compact(dist);
-            RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to compact distribution");
-            if (dist->rt->has_error) {
-                return EXIT_FAILURE;
-            }
-        }
-    }
-        
-    retcode = insert_value(dist, value);
-    RT_ASSERT(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to insert value into distribution");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
-}
-
-void display_distribution(distribution_t *dist, FILE *fp) {
-    fprintf(fp, "Distribution: Count = %d, Bin Count A = %d, Bin Count B = %d, Generation = %d\n", 
-        dist->count,
-        dist->bin_count_a,
-        dist->bin_count_b,
-        dist->generation
-    );
-
-    fprintf(fp, "    Bins A: \n");
-    for (int i = 0; i < dist->bin_count_a; i++) {
-        if (i % 20 == 0) {
-            fprintf(fp, "    ") ;
-        }
-        fprintf(fp, "%0.2lf", dist->bins_a[i]);
-        if (i % 20 == 19) { 
-            fprintf(fp, "\n");
-        } else {
-            fprintf(fp, " ");
-        }
-    }
-    fprintf(fp, "\n");
-    fprintf(fp, "    Bins B: \n");
-    for (int i = 0; i < dist->bin_count_b; i++) {
-        if (i % 20 == 0) {
-            fprintf(fp, "    ") ;
-        }
-        fprintf(fp, "%0.2lf", dist->bins_b[i]);
-        if (i % 20 == 19) { 
-            fprintf(fp, "\n");
-        } else {
-            fprintf(fp, " ");
-        }
-    }
-    fprintf(fp, "\n");
-}
 
 int get_percentile_aux(runtime_t *rt, double *bins, int bin_count, double pct, double *value) {
     double double_idx = pct * bin_count;
@@ -223,33 +262,4 @@ int get_percentile_aux(runtime_t *rt, double *bins, int bin_count, double pct, d
     return EXIT_SUCCESS;
 }
 
-int get_percentile(distribution_t *dist, double pct, double *value) {
-    RT_ASSERT(dist->rt, pct >= 0.0 && pct <= 1.0, "Error: Percentile is out of range");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    if (dist->count == 0) {
-        *value = 0.0;
-        return EXIT_SUCCESS;
-    }
-    if (dist->count == 1) {
-        *value = dist->bins_a[0];
-        return EXIT_SUCCESS;
-    }
-    
-    double result_a;
-    int retcode_a = get_percentile_aux(dist->rt, dist->bins_a, dist->bin_count_a, pct, &result_a);
-    RT_ASSERT(dist->rt, retcode_a == EXIT_SUCCESS, "Error: Failed to get percentile from bins A");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    
-    double result_b;
-    int retcode_b = get_percentile_aux(dist->rt, dist->bins_b, dist->bin_count_b, pct, &result_b);
-    RT_ASSERT(dist->rt, retcode_b == EXIT_SUCCESS, "Error: Failed to get percentile from bins B");
-    if (dist->rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    *value = (result_a * dist->bin_count_a + result_b * dist->bin_count_b) / ((double) dist->bin_count_a + dist->bin_count_b);
-    return EXIT_SUCCESS;
-}
+*/

@@ -9,9 +9,10 @@
 #include "distribution.h"
 #include "runtime.h"
 
-int compare(char *filename, distribution_t *dist, double *samples, int sample_count) {
-    int retcode;
-    
+
+int compare(char *filename, histogram_t *hst, double *samples, int sample_count) {
+    retcode_t rc;
+   
     // sort samples using shell sort
     int gap = sample_count / 2;
     while (gap > 0) {
@@ -26,15 +27,17 @@ int compare(char *filename, distribution_t *dist, double *samples, int sample_co
         }
         gap /= 2;
     }
+    percentiles_t pcts;
+    rc = hst_get_percentiles(hst, &pcts);
+    RT_CHECK_NO_ERROR(hst->rt);
+
     FILE *fp = fopen(filename, "w");
     LOG_ASSERT(fp != NULL, "Error: Failed to open file %s", filename);
 
     fprintf(fp, "PCT\tSAMPLE\tDIST\tDIFF\n");
-    for (int i = 0; i < BIN_COUNT; i++) {
-        double pct = ((double)i) / BIN_COUNT;
-        double value;
-        retcode = get_percentile(dist, pct, &value);
-        RT_CHECK_NO_ERROR(dist->rt);
+    for (int i = 0; i < pcts.bin_count; i++) {
+        double pct = pcts.pcts[i];
+        double value = pcts.values[i];
         double double_sample_idx = pct * sample_count;
         int sample_idx = (int)double_sample_idx;
         double sample_value = samples[sample_idx];
@@ -46,76 +49,36 @@ int compare(char *filename, distribution_t *dist, double *samples, int sample_co
             sample_value - value
         );
     }
-    retcode = fclose(fp);
-    LOG_ASSERT(retcode == 0, "Error: Failed to close file %s", filename);
-    return EXIT_SUCCESS;
-}
-
-int write_data(distribution_t *dist, char *filename, bool open, bool close) {
-    int retcode = 0;
-    static FILE *fp;
-    
-    //if (open || close) {
-    //    LOG_WARN("SKIPPING write_data for speed and testing");
-    //}
-    //return EXIT_SUCCESS;
-
-    if (open) {
-        fp = fopen(filename, "wb");
-        LOG_ASSERT(fp != NULL, "Error: Failed to open file %s", filename);
-        return EXIT_SUCCESS;
-    }
-    if (close) {
-        retcode = fclose(fp);
-        LOG_ASSERT(retcode == 0, "Error: Failed to close file %s", filename);
-        return EXIT_SUCCESS;
-    }    
-    for (int i = 0; i < BIN_COUNT; i++) {
-        double pct = ((double)i) / BIN_COUNT;
-        double row[2];
-        row[0] = pct;
-        int retcode = get_percentile(dist, pct, &row[1]);
-        RT_PANIC(dist->rt, retcode == EXIT_SUCCESS, "Error: Failed to get percentile");
-        int written = fwrite(row, sizeof(double), 2, fp);
-        LOG_ASSERT(written == 2, "Error: Failed to write data to file %s", filename);
-    }
+    rc = fclose(fp);
+    LOG_ASSERT(rc == 0, "Error: Failed to close file %s", filename);
     return EXIT_SUCCESS;
 }
 
 int main() {
-    int retcode;
+    retcode_t rc;
     double *samples = NULL;
-    int capacity = 9999999;
+    int capacity = 999999999;
     int curr_sample_idx = -1; 
-    samples = malloc(sizeof(double) * 9999999);
+    samples = malloc(sizeof(double) * 999999999);
     LOG_ASSERT(samples != NULL, "Error: Failed to allocate memory for samples");
 
     runtime_t rt;
-    distribution_t dist;
+    histogram_t hst;
     runtime_init(&rt);
-    init_distribution(&rt, &dist);
-    srand(0);
-
+    rc = hst_init(&rt, &hst, 2, -3);
+    RT_PANIC(&rt, rc == EXIT_SUCCESS, "Error: Failed to initialize histogram");
     double value;
-    retcode = write_data(&dist, "./data/animation/distribution.bin", true, false);
-    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to open distribution data file");
     while (scanf("%lf", &value) != EOF) {
         samples[++curr_sample_idx] = value;
         curr_sample_idx = curr_sample_idx % capacity;
-        //LOG_DEBUG("%lf", value);
-        retcode = update_distribution(&dist, value);
-        //display_distribution(&dist);
-        RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to update distribution");        
-        retcode = write_data(&dist, "./data/animation/distribution.bin", false, false);
-        RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to write distribution data");
+        rc = hst_update(&hst, value);
+        RT_PANIC(&rt, rc == EXIT_SUCCESS, "Error: Failed to update histogram");        
     }
-    retcode = write_data(&dist, "./data/animation/distribution.bin", false, true);
-    RT_PANIC(dist.rt, retcode == EXIT_SUCCESS, "Error: Failed to close distribution data file");
-    
-    display_distribution(&dist, stderr);
-    
-    double sample_count = dist.count < capacity ? dist.count : capacity;
-    retcode = compare("histog.out", &dist, samples, sample_count);
-    LOG_ASSERT(retcode == EXIT_SUCCESS, "Error: Failed to compare distributions");
+    rc = hst_display(&hst, stderr);
+    RT_PANIC(&rt, rc == EXIT_SUCCESS, "Error: failed to display histogram");
+
+    rc = compare("histog.out", &hst, samples, curr_sample_idx);
+    RT_PANIC(&rt, rc == EXIT_SUCCESS, "Error: Failed to compare distributions");
+
     return 0;
 }
