@@ -10,6 +10,7 @@ typedef struct {
 } bin_t;
 
 typedef struct {
+    char header[4]; 
     runtime_t *rt;
     int base;
     int exponent;
@@ -29,8 +30,11 @@ typedef int retcode_t;
 retcode_t hst_init(runtime_t *rt, histogram_t *hst, int base, int exponent);
 extern retcode_t hst_destroy(histogram_t *hst);
 extern retcode_t hst_update(histogram_t *hst, double value);
+extern retcode_t hst_debug(histogram_t *hst, FILE *fp);
 extern retcode_t hst_display(histogram_t *hst, FILE *fp);
 extern retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts);
+extern retcode_t hst_save(histogram_t *hst, FILE *fp);
+extern retcode_t hst_load(runtime_t *rt, histogram_t *hst, FILE *fp);
 
 /*
 // typedefs
