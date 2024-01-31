@@ -18,6 +18,7 @@ typedef struct {
     char *filename;
     int base;
     int exponent;
+    bool percentiles;
     bool quiet;
     bool help;
 } options_t;
@@ -28,6 +29,7 @@ void usage(char *progname) {
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -b BASE     Set the base of the histogram. Defaults to " "\n");
     fprintf(stderr, "  -e EXPONENT Set the exponent of the histogram\n");
+    fprintf(stderr, "  -p          Show percentiles\n");
     fprintf(stderr, "  -q          Quiet mode\n");
     fprintf(stderr, "  -h          Print this message and exit\n");
 }
@@ -37,10 +39,11 @@ retcode_t parse_options(runtime_t *rt, int argc, char *argv[], options_t *option
     options->filename = NULL;
     options->base = DEFAULT_BASE;
     options->exponent = DEFAULT_EXPONENT;
+    options->percentiles = false;
     options->quiet = false;
     options->help = false;
 
-    while ((opt = getopt(argc, argv, "b:e:qh")) != -1) {
+    while ((opt = getopt(argc, argv, "b:e:pqh")) != -1) {
         switch (opt) {
             case 'b':
                 options->base = atoi(optarg);
@@ -53,6 +56,10 @@ retcode_t parse_options(runtime_t *rt, int argc, char *argv[], options_t *option
             case 'e':
                 options->exponent = atoi(optarg);
                 break;
+
+            case 'p':
+                options->percentiles = true;
+                break;	
 
             case 'q':
                 options->quiet = true;
@@ -111,7 +118,16 @@ int main(int argc, char *argv[]) {
     }
 
     double value;
-    while (scanf("%lf", &value) != EOF) {
+    while (1) {
+        int read = scanf("%lf", &value);
+        if (read == EOF) {
+            break;
+        }
+        if (read == 0) {
+            // consume the bad input and continue
+            scanf("%*[^0-9+-.]");
+            continue;
+        }
         rc = hst_update(&hst, value);
         if (rc != EXIT_SUCCESS) {
             runtime_print_error(&rt);
@@ -120,10 +136,19 @@ int main(int argc, char *argv[]) {
     }
     
     if (!options.quiet) {
-        rc = hst_display(&hst, stderr);
-        if (rc != EXIT_SUCCESS) {
-            runtime_print_error(&rt);
-            return EXIT_FAILURE;
+        if (options.percentiles) {
+            rc = hst_display_percentiles(&hst, stdout);
+            if (rc != EXIT_SUCCESS) {
+                runtime_print_error(&rt);
+                return EXIT_FAILURE;
+            }
+            
+        } else {
+            rc = hst_display(&hst, stdout);
+            if (rc != EXIT_SUCCESS) {
+                runtime_print_error(&rt);
+                return EXIT_FAILURE;
+            }
         }
     }
 

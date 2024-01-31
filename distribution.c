@@ -186,7 +186,19 @@ retcode_t hst_update(histogram_t *hst, double value) {
     return EXIT_SUCCESS; 
 }
 
-retcode_t hst_debug(histogram_t *hst, FILE *fp) {
+retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts) {
+    double curr_count = 0.0;
+    pcts->bin_count = hst->bin_count;
+    for (int i = 0; i < hst->bin_count; i++) {
+        double bin_pct = curr_count / (double)hst->count;
+        pcts->pcts[i] = bin_pct;
+        pcts->values[i] = hst->bins[i].alpha * pow(hst->base, hst->exponent);
+        curr_count += hst->bins[i].count;
+    }
+    return EXIT_SUCCESS;
+}
+
+retcode_t hst_display(histogram_t *hst, FILE *fp) {
     fprintf(fp, "Histogram: Count = %d, Bin Count = %d, Exponent = %d\n", 
         hst->count,
         hst->bin_count,
@@ -210,7 +222,7 @@ retcode_t hst_debug(histogram_t *hst, FILE *fp) {
     return EXIT_SUCCESS;
 }
 
-retcode_t hst_display(histogram_t *hst, FILE *fp) {
+retcode_t hst_display_percentiles(histogram_t *hst, FILE *fp) {
     retcode_t rc;
     percentiles_t pcts[BIN_COUNT];
     rc = hst_get_percentiles(hst, pcts);
@@ -220,19 +232,7 @@ retcode_t hst_display(histogram_t *hst, FILE *fp) {
     }
     fprintf(fp, "PCT\tVALUE\n");
     for (int i = 0; i < pcts->bin_count; i++) {
-        fprintf(fp, "%0.2lf\t%0.2lf\n", pcts->pcts[i], pcts->values[i]);
-    }
-    return EXIT_SUCCESS;
-}
-
-retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts) {
-    double curr_count = 0.0;
-    pcts->bin_count = hst->bin_count;
-    for (int i = 0; i < hst->bin_count; i++) {
-        double bin_pct = curr_count / (double)hst->count;
-        pcts->pcts[i] = bin_pct;
-        pcts->values[i] = hst->bins[i].alpha * pow(hst->base, hst->exponent);
-        curr_count += hst->bins[i].count;
+        fprintf(fp, "%lf\t%lf\n", pcts->pcts[i], pcts->values[i]);
     }
     return EXIT_SUCCESS;
 }
@@ -246,7 +246,6 @@ retcode_t hst_save(histogram_t *hst, FILE *fp) {
     }
     hst->rt = NULL;
     int written = fwrite(hst, sizeof(histogram_t), 1, fp);
-    LOG_DEBUG("Written = %d", written);
     RT_ASSERT(rt, written == 1, "Error: Failed to write histogram to file");
     if (rt->has_error) {
         return EXIT_FAILURE;
@@ -261,7 +260,6 @@ retcode_t hst_load(runtime_t *rt, histogram_t *hst, FILE *fp) {
         return EXIT_FAILURE;
     }
     int read = fread(hst, sizeof(histogram_t), 1, fp);
-    LOG_DEBUG("Read %d bytes from file", read);
     RT_ASSERT(rt, read == 1, "Error: Failed to read histogram from file");
     if (rt->has_error) {
         return EXIT_FAILURE;
