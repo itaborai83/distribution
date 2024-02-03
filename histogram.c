@@ -12,7 +12,7 @@
 #include "runtime.h"
 
 retcode_t hst_init(runtime_t *rt, histogram_t *hst, int base, int exponent) {
-    memcpy(hst->header, "HST", 3);
+    memcpy(hst->header, "HST", 4);
     hst->rt = rt;
     hst->count = 0;
     hst->bin_count = 0;
@@ -74,7 +74,6 @@ recompact:
     }
 
     // clear old bins
-    memset(hst->bins, 0, sizeof(hst->bins));
     for (int i = 0; i < BIN_COUNT; i++) {
         if (i < new_bin_count) {
             hst->bins[i].alpha = new_bins[i].alpha;
@@ -325,46 +324,3 @@ retcode_t hst_get_percentile(histogram_t *hst, percentiles_t *pcts, double pct, 
     }
     return EXIT_SUCCESS;
 }
-
-/*
-double interpolate(double *bins, int start_idx, int end_idx) {
-    // perform linear interpolation between the current bin and the next bin using the bin index as the x-axis
-    double x1 = start_idx;
-    double x2 = end_idx;
-    double y1 = bins[start_idx];
-    double y2 = bins[end_idx];
-    double x = (x1 + x2) / 2.0;
-    double m = (y2 - y1) / (x2 - x1);
-    double y = m * (x - x1) + y1;
-    return y;
-}
-
-
-int get_percentile_aux(runtime_t *rt, double *bins, int bin_count, double pct, double *value) {
-    double double_idx = pct * bin_count;
-    int idx = (int)double_idx;
-    if (idx >= bin_count) {
-        *value = bins[bin_count - 1];
-        return EXIT_SUCCESS;
-    }
-    
-    *value = bins[idx];
-    if (idx == bin_count - 1) {
-        return EXIT_SUCCESS;
-    }    
-    double curr_pct = (idx) / (double)bin_count;
-    double next_pct = (idx + 1) / (double)bin_count;
-    double pct_range = next_pct - curr_pct;
-    double bin_range = bins[idx + 1] - bins[idx];
-    double error_pct = (pct - curr_pct) / pct_range;
-    double correction_term = error_pct * bin_range;
-    *value += correction_term;
-    RT_ASSERT(rt, correction_term >= 0.0, "Error: Correction term is negative");
-    RT_ASSERT(rt, correction_term <= bin_range, "Error: Correction term is greater than bin range");
-    if (rt->has_error) {
-        return EXIT_FAILURE;
-    }
-    return EXIT_SUCCESS;
-}
-
-*/
