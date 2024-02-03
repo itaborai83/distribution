@@ -1,15 +1,11 @@
-#include <stdlib.h>
-#include <stdbool.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <float.h>
-#include <time.h>
 
 #include "logger.h"
 #include "histogram.h"
 #include "runtime.h"
-
 
 #define DEFAULT_BASE 2
 #define DEFAULT_EXPONENT -3
@@ -27,12 +23,13 @@ typedef struct {
 
 void usage(char *progname) {
     fprintf(stderr, "Usage: %s [OPTIONS] FILE\n", progname);
-    fprintf(stderr, "Compare the distribution of samples in FILE to the distribution of samples in standard input\n");
+    fprintf(stderr, "Updates a histogram from values read from stdin and displays the resulting histogram or the percentiles.\n");
+    fprintf(stderr, "If FILE is given, it will try to read it and save the updated histogram in it afterwards.\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -b BASE     Set the base of the histogram. Defaults to %d\n", DEFAULT_BASE);
     fprintf(stderr, "  -e EXPONENT Set the exponent of the histogram. Defaults to %d\n", DEFAULT_EXPONENT);
-    fprintf(stderr, "  -p          Show percentiles\n");
-    fprintf(stderr, "  -P          Set the precision of the percentiles. Defaults to %0.02lf\n", DEFAULT_PERCENTILES_PRECISION);
+    fprintf(stderr, "  -p          Show percentiles. Use default precision of %0.02lf\n", DEFAULT_PERCENTILES_PRECISION);
+    fprintf(stderr, "  -P          Set the precision of the percentiles. Implies -p.\n");
     fprintf(stderr, "  -q          Quiet mode\n");
     fprintf(stderr, "  -h          Print this message and exit\n");
 }
@@ -42,12 +39,12 @@ retcode_t parse_options(runtime_t *rt, int argc, char *argv[], options_t *option
     options->filename = NULL;
     options->base = DEFAULT_BASE;
     options->exponent = DEFAULT_EXPONENT;
-    options->percentiles_precision = DEFAULT_PERCENTILES_PRECISION;
     options->percentiles = false;
+    options->percentiles_precision = DEFAULT_PERCENTILES_PRECISION;
     options->quiet = false;
     options->help = false;
 
-    while ((opt = getopt(argc, argv, "b:e:pqh")) != -1) {
+    while ((opt = getopt(argc, argv, "b:e:pP:qh")) != -1) {
         switch (opt) {
             case 'b':
                 options->base = atoi(optarg);
@@ -66,6 +63,7 @@ retcode_t parse_options(runtime_t *rt, int argc, char *argv[], options_t *option
                 break;	
 
             case 'P':
+                options->percentiles = true;
                 options->percentiles_precision = atof(optarg);
                 break;
 

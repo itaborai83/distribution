@@ -199,9 +199,10 @@ retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts) {
 }
 
 retcode_t hst_display(histogram_t *hst, FILE *fp) {
-    fprintf(fp, "Histogram: Count = %d, Bin Count = %d, Exponent = %d\n", 
+    fprintf(fp, "Histogram: Count = %d, Bin Count = %d, Base = %d, Exponent = %d\n", 
         hst->count,
         hst->bin_count,
+        hst->base,
         hst->exponent
     );
     fprintf(fp, "    Bins: \n");
@@ -283,15 +284,16 @@ retcode_t hst_load(runtime_t *rt, histogram_t *hst, FILE *fp) {
 
 retcode_t hst_get_percentile(histogram_t *hst, percentiles_t *pcts, double pct, double *value) {
     RT_ASSERT(hst->rt, pct >= 0.0, "Error: Percentile is less than zero");
-    RT_ASSERT(hst->rt, pct <= 1.0, "Error: Percentile is greater than one");
+    RT_ASSERT(hst->rt, pct < 1.0, "Error: Percentile is greater than one");
     RT_ASSERT(hst->rt, pcts->bin_count > 0, "Error: Percentiles are empty");
     if (hst->rt->has_error) {
         return EXIT_FAILURE;
     }
-    *value = pcts->values[pcts->bin_count - 1] = DBL_MAX;
+    *value = pcts->values[pcts->bin_count - 1];
     for (int i = 0; i < pcts->bin_count; i++) {
         
         *value = pcts->values[i];
+        
         // if the percentile is greater than the last percentile, return the last value.
         // No interpolation is necessary/possible.
         if (i == pcts->bin_count - 1) {

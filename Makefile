@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -I./ -DBIN_COUNT=200 -DOUTLIER_COUNT=2 -O0 -g
+CFLAGS = -Wall -Wextra -I./ -DBIN_COUNT=200 -O0 -g
 LDFLAGS = -lm
 
 HDR = histogram.h logger.h runtime.h
