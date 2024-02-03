@@ -20,15 +20,13 @@ When the histogram needs to go under a compaction procedure, to allow the insert
 
 If two or more bins result in the same `alpha` value, their counts are added together in the resulting compacted histogram. Since it is not necessarily true that a compaction run will merge bins together (due to the values being too spread), the compaction procedure is repeated until the number of used bins (after compaction) is reduced.
 
- I hope you find this helpful.
-
 ---
 
  ## **Example Command Line Application**
 
 A simple command line program was created to illustrate how the histogram can be used in a practical scenario.
 
-The program is named `histog` and it reads `stdin` parsing numerical values and updating an histogram. To compile it, simple issue a `make` command on the shell
+The program is named `histog` and it reads `stdin` parsing numerical values and updating an histogram. To compile it, simply issue a `make` command on the shell
 
     $ ./histog -h
     Usage: ./histog [OPTIONS] FILE
@@ -88,3 +86,5 @@ If a filename is specified, it will persist the updated histogram between invoca
         Bins:
         (1.00, 2) (2.00, 4) (3.00, 6) (4.00, 8) (5.00, 10)
         (15.00, 1) (16.00, 1) (17.00, 1)
+
+ I hope you find this helpful.
