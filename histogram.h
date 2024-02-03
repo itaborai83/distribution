@@ -1,5 +1,5 @@
-#ifndef DISTRIBUTION_H
-#define DISTRIBUTION_H
+#ifndef HISTOGRAM_H
+#define HISTOGRAM_H
 
 #include <stdbool.h>
 #include "runtime.h"
@@ -32,27 +32,9 @@ extern retcode_t hst_destroy(histogram_t *hst);
 extern retcode_t hst_update(histogram_t *hst, double value);
 extern retcode_t hst_debug(histogram_t *hst, FILE *fp);
 extern retcode_t hst_display(histogram_t *hst, FILE *fp);
-retcode_t hst_display_percentiles(histogram_t *hst, FILE *fp);
-extern retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts);
+retcode_t hst_display_percentiles(histogram_t *hst, FILE *fp, double precision);
 extern retcode_t hst_save(histogram_t *hst, FILE *fp);
 extern retcode_t hst_load(runtime_t *rt, histogram_t *hst, FILE *fp);
-
-/*
-// typedefs
-typedef struct {
-    runtime_t *rt;    
-    int count;
-    int bin_count_a;
-    int bin_count_b;
-    int generation;
-    double bins_a[BIN_COUNT];
-    double bins_b[BIN_COUNT];
-} distribution_t;
-
-extern void init_distribution(runtime_t *rt, distribution_t *dist);
-extern void copy_distribution(distribution_t *src, distribution_t *dst);
-extern int update_distribution(distribution_t *dist, double value);
-extern void display_distribution(distribution_t *dist, FILE *fp);
-extern int get_percentile(distribution_t *dist, double pct, double *value);
-*/
-#endif // DISTRIBUTION_H
+extern retcode_t hst_get_percentiles(histogram_t *hst, percentiles_t *pcts);
+extern retcode_t hst_get_percentile(histogram_t *hst, percentiles_t *pcts, double pct, double *value);
+#endif // HISTOGRAM_H

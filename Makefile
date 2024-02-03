@@ -1,11 +1,11 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -I/usr/include/json-c -I./ -DBIN_COUNT=200 -DOUTLIER_COUNT=2 -O0 -g
-LDFLAGS = -ljson-c -lm
+CFLAGS = -Wall -Wextra -I./ -DBIN_COUNT=200 -DOUTLIER_COUNT=2 -O0 -g
+LDFLAGS = -lm
 
-HDR = distribution.h logger.h runtime.h
-SRC = main.c distribution.c distribution.h 
-OBJ = main.o distribution.o runtime.o
-LIB = libdistribution.so
+HDR = histogram.h logger.h runtime.h
+SRC = main.c histogram.c histogram.h 
+OBJ = main.o histogram.o runtime.o
+LIB = libhistogram.so
 EXEC = histog
 
 all: $(EXEC)

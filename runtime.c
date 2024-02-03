@@ -8,7 +8,6 @@
 #include <stdarg.h>
 
 void runtime_init(runtime_t *rt) {
-    srand(time(0));
     rt->error_stack = NULL;
     rt->has_error = false;
 }
@@ -25,10 +24,23 @@ void runtime_push_error(runtime_t *rt, const char *file, const char *func, const
     vsnprintf(err->error_msg, ERROR_MSG_SIZE, format_error, args);
     va_end(args);
 
-    // copy error msg into buffer
-    err->inner_error = curr;
-    rt->error_stack = err;
     rt->has_error = true;
+
+    // list is empty
+    if (curr == NULL) {
+        rt->error_stack = err;
+        return;
+    }
+
+    // list is not empty
+    while(1) {
+        if (curr->inner_error == NULL) {
+            curr->inner_error = err;
+            break;
+        }
+        curr = curr->inner_error;
+    }
+
     return;
 }
 
@@ -49,14 +61,10 @@ void runtime_destroy(runtime_t *rt) {
     return;
 }
 
-static void _runtime_print_error(error_entry_t *curr) {
-    if (curr == NULL) {
-        return;
-    }
-    _runtime_print_error(curr->inner_error);
-    fprintf(stderr, "[ERROR]%s:%d:%s:\n\t%s\n", curr->file, curr->line, curr->func, curr->error_msg);
-}
-
 void runtime_print_error(runtime_t *rt) {
-    _runtime_print_error(rt->error_stack);
+    error_entry_t *curr = rt->error_stack;
+    while (curr != NULL) {
+        fprintf(stderr, "[ERROR]%s:%d:%s:\n\t%s\n", curr->file, curr->line, curr->func, curr->error_msg);
+        curr = curr->inner_error;
+    }
 }

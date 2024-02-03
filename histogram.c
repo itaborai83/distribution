@@ -7,7 +7,7 @@
 #include <math.h>
 #include <limits.h>
 
-#include "distribution.h"
+#include "histogram.h"
 #include "logger.h"
 #include "runtime.h"
 
@@ -222,17 +222,30 @@ retcode_t hst_display(histogram_t *hst, FILE *fp) {
     return EXIT_SUCCESS;
 }
 
-retcode_t hst_display_percentiles(histogram_t *hst, FILE *fp) {
+retcode_t hst_display_percentiles(histogram_t *hst, FILE *fp, double precision) {
     retcode_t rc;
     percentiles_t pcts[BIN_COUNT];
+    
+    RT_ASSERT(hst->rt, precision > 0.0, "Error: Precision is less than zero");
+    RT_ASSERT(hst->rt, precision < 1.0, "Error: Precision is greater than one");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    
     rc = hst_get_percentiles(hst, pcts);
     RT_ASSERT(hst->rt, rc == EXIT_SUCCESS, "Error: Failed to get percentiles");
     if (hst->rt->has_error) {
         return EXIT_FAILURE;
     }
     fprintf(fp, "PCT\tVALUE\n");
-    for (int i = 0; i < pcts->bin_count; i++) {
-        fprintf(fp, "%lf\t%lf\n", pcts->pcts[i], pcts->values[i]);
+    for (double pct = 0; pct < 1.0; pct += precision) {
+        double value;
+        rc = hst_get_percentile(hst, pcts, pct, &value);
+        RT_ASSERT(hst->rt, rc == EXIT_SUCCESS, "Error: Failed to get percentile");
+        if (hst->rt->has_error) {
+            return EXIT_FAILURE;
+        }
+        fprintf(fp, "%lf\t%lf\n", pct, value);
     }
     return EXIT_SUCCESS;
 }
@@ -265,6 +278,49 @@ retcode_t hst_load(runtime_t *rt, histogram_t *hst, FILE *fp) {
         return EXIT_FAILURE;
     }
     hst->rt = rt;
+    return EXIT_SUCCESS;
+}
+
+retcode_t hst_get_percentile(histogram_t *hst, percentiles_t *pcts, double pct, double *value) {
+    RT_ASSERT(hst->rt, pct >= 0.0, "Error: Percentile is less than zero");
+    RT_ASSERT(hst->rt, pct <= 1.0, "Error: Percentile is greater than one");
+    RT_ASSERT(hst->rt, pcts->bin_count > 0, "Error: Percentiles are empty");
+    if (hst->rt->has_error) {
+        return EXIT_FAILURE;
+    }
+    *value = pcts->values[pcts->bin_count - 1] = DBL_MAX;
+    for (int i = 0; i < pcts->bin_count; i++) {
+        
+        *value = pcts->values[i];
+        // if the percentile is greater than the last percentile, return the last value.
+        // No interpolation is necessary/possible.
+        if (i == pcts->bin_count - 1) {
+            return EXIT_SUCCESS;
+        }
+
+        // if the percentile is between the current and next percentile, interpolate the value
+        if (pcts->pcts[i] <= pct && pct <= pcts->pcts[i + 1]) {
+            double bin_pct = pcts->pcts[i];
+            double bin_value = pcts->values[i];
+            double next_bin_pct = pcts->pcts[i + 1];
+            double next_bin_value = pcts->values[i + 1];
+            // interpolate the value
+            double pct_range = next_bin_pct - bin_pct;
+            double bin_range = next_bin_value - bin_value;
+            double error_pct = (pct - bin_pct) / pct_range;
+            double correction_term = error_pct * bin_range;
+            // set the value
+            *value += correction_term;
+            
+            RT_ASSERT(hst->rt, correction_term >= 0.0, "Error: Correction term is negative");
+            RT_ASSERT(hst->rt, correction_term <= bin_range, "Error: Correction term is greater than bin range");
+            if (hst->rt->has_error) {
+                return EXIT_FAILURE;
+            }
+            
+            return EXIT_SUCCESS;
+        }
+    }
     return EXIT_SUCCESS;
 }
 
